@@ -5,8 +5,13 @@ export default {
     glsl({
       // By default, everything is included
       include: '**/*.glsl',
-      sourceMap: true,
+      sourceMap: false,
       compress: false
-    })
+    }),
   ],
+  esbuild: {
+    jsxFactory: 'React.createElement',
+    jsxFragment: 'React.Fragment',
+    jsxInject: `import React from 'react'`
+  }
 }
