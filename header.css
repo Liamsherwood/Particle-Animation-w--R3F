@@ -1,0 +1,15 @@
+#root {
+  height: 100vh;
+}
+
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+/* Hide the logo initially */
+.logo-container img { 
+  opacity: 1;
+  transition: transform 0.3s ease-out, top 0.3s ease-out; 
+}
