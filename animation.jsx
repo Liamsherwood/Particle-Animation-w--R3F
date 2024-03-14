@@ -1,18 +1,63 @@
-import { Suspense, useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useRef } from 'react';
 import { Canvas, useLoader, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { gsap } from 'gsap';
-import { Simplex, Worley, Curl, patchShaders } from 'gl-noise'
-import ReactDOM from 'react-dom';
+import { Simplex, Curl, patchShaders } from 'gl-noise'
 import { createRoot } from 'react-dom/client';
 
 import vertexShader from './shaders/vertex.glsl';
 import fragmentShader from './shaders/fragment.glsl';
-const chunks = [[ Simplex, Worley, Curl], null,]
-const [patchedVertexShader, patchedFragmentShader] = await patchShaders([vertexShader, fragmentShader], chunks);
+const chunks = [[ Simplex, Curl], null,]
+let patchedVertexShader, patchedFragmentShader;
 
-function Animation() {
+const loadShaders = async () => {
+  [patchedVertexShader, patchedFragmentShader] = await patchShaders([vertexShader, fragmentShader], chunks);
+};
+
+loadShaders();
+
+// Functions...
+const createCanvas = (texture) => {
+  let canvas = document.createElement('canvas');
+  let textureWidth = texture.image.width * 0.35;
+  let textureHeight = texture.image.height * 0.35;
+  let aspect = texture.image.width / texture.image.height;
+  canvas.height = window.innerHeight * 0.55;
+  canvas.width = canvas.height * aspect;
+  let context = canvas.getContext('2d');
+  context.drawImage(texture.image, 0, 0, canvas.width, canvas.height);
+  return { canvas, context };
+};
+const getImageData = (canvas, context) => {
+  return context.getImageData(0, 0, canvas.width, canvas.height);
+};
+const extractPositionsAndColors = (imageData) => {
+  let positions = [];
+  let colors = [];
+  for (let y = 0; y < imageData.height; y += 1) {
+    for (let x = 0; x < imageData.width; x += 1) {
+      let index = (x + y * imageData.width) * 4;
+      let r = imageData.data[index];
+      let g = imageData.data[index + 1];
+      let b = imageData.data[index + 2];
+      if (r > 0 || g > 0 || b > 0) {
+        let scale = 0.05;
+        let position = new THREE.Vector3((x - imageData.width / 2) * scale, (-y + imageData.height / 2) * scale, 0);
+        positions.push(position.x, position.y, position.z);
+        colors.push(r / 255, g / 255, b / 255);
+      }
+    }
+  }
+  return { positions, colors };
+}
+const createGeometry = (positions, colors) => {
+  let geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  return geometry;
+};
+const Animation = React.memo(() => {
   const texture = useLoader(THREE.TextureLoader, 'src/assets/images/logo.png');
   const { camera, gl, scene } = useThree();
   const PointsRef = useRef();
@@ -24,46 +69,20 @@ function Animation() {
   const initialPositionsRef = useRef([]);
   const currentPositionsRef = useRef([]);
   
+  // moved functions from here to top of file
   useEffect(() => {
     if (!texture.image || !PointsRef.current) {
       return;
     }
-    let canvas = document.createElement('canvas');
-    let textureWidth = texture.image.width * 0.35;
-    let textureHeight = texture.image.height * 0.35;
-    let aspect = texture.image.width / texture.image.height;
-    canvas.height = window.innerHeight * 0.55;
-    canvas.width = canvas.height * aspect;
-    let context = canvas.getContext('2d');
-    context.drawImage(texture.image, 0, 0, canvas.width, canvas.height);
-    let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    let positions = [];
-    let colors = [];
+    const { canvas, context } = createCanvas(texture);
+    const imageData = getImageData(canvas, context);
     let position = [];
     let velocities = [];
     let initialPositions = [];
     let currentPositions = [];
-    console.log ("imageData width: ", imageData.width, "imageData height: ", imageData.height);
-
-    let n = 1.0;
-    for (let y = 0; y < imageData.height; y += n) {
-      for (let x = 0; x < imageData.width; x += n) {
-        let index = (x + y * imageData.width) * 4;
-        let r = imageData.data[index];
-        let g = imageData.data[index + 1];
-        let b = imageData.data[index + 2];
-        if (r > 0 || g > 0 || b > 0) {
-          let scale = 0.05;
-          let position = new THREE.Vector3((x - imageData.width / 2) * scale, (-y + imageData.height / 2) * scale, 0);
-          positions.push(position.x, position.y, position.z);
-          colors.push(r / 255, g / 255, b / 255);
-        }
-      }
-    }
-    geometryRef.current = new THREE.BufferGeometry();
-    geometryRef.current.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    positionsRef.current = positions;
-    geometryRef.current.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const { positions, colors } = extractPositionsAndColors(imageData);
+    geometryRef.current = createGeometry(positions, colors);
+    // positionsRef.current = positions; * Check if this is needed, if not remove it. -> significantly drops CPU load *
 
     let pts = new Array(positions.length / 3).fill().map((p, i) => {
       let position = new THREE.Vector3()
@@ -110,16 +129,15 @@ function Animation() {
         blending: THREE.NormalBlending,
       });
       materialRef.current = material;
-      console.log("material: ", materialRef.current);
     } catch (error) {
       console.error("Error creating ShaderMaterial: ", error);
     }
 
-    gsap.to(materialRef.current.uniforms.opacity, {
-      value: 0,
-      duration: 0.5,
-      delay: 5.9,
-    });
+    // gsap.to(materialRef.current.uniforms.opacity, {
+    //   value: 0,
+    //   duration: 0.5,
+    //   delay: 5.9,
+    // });
   
     let tl = gsap.timeline();
 
@@ -138,9 +156,9 @@ function Animation() {
     });
   
     tl.eventCallback("onComplete", function() {
-      setIsInitialized(true);
     }, [texture, PointsRef.current]);
     
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
   useFrame(({ clock }) => {
     if (materialRef.current && geometryRef.current) {
@@ -181,10 +199,9 @@ function Animation() {
         <bufferGeometry attach="geometryRef.current"/>
         <shaderMaterial attach="materialRef.current"/>
       </points>
-      {console.log("PointsRef: ", PointsRef.current)}
     </>
   );
-}
+})
 
 export default function App() {
   return (
@@ -193,9 +210,7 @@ export default function App() {
       style={{ width: '100vw', height: '100vh' }}
     >
       <PerspectiveCamera makeDefault position={[0, 0, 80]} />
-      <Suspense fallback={null}>
-        <Animation />
-      </Suspense>
+      <Animation />
       <OrbitControls enableDamping={false} zoomToCursor={false} enableRotate={false} maxDistance={100} minDistance={100} />
     </Canvas>
   );
